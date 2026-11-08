@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="studio-key" content="__SESSION_KEY__">
+  <title>ID Card Studio</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/studio.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo" aria-hidden="true">ID</span><div><strong>ID Card Studio</strong><small>LOCAL WORKSPACE</small></div></div>
+  <div class="top-actions"><span id="setup-label">Untitled setup</span><button id="open">Open Setup</button><button id="save">Save Setup</button></div>
+</header>
+<main>
+  <aside class="inputs" aria-label="Batch inputs">
+    <div class="rail-title"><span class="eyebrow">WORKFLOW</span><h1>Batch setup</h1><p>Select your files and configure the export.</p></div>
+    <section>
+      <h2><b>01</b> Template</h2>
+      <button class="pick" id="pdf">Choose PDF template</button><div class="filename" id="pdf-name">No template selected</div>
+      <button class="text-button" id="pages" hidden>Choose front and back</button>
+    </section>
+    <section>
+      <h2><b>02</b> Employee data</h2>
+      <button class="pick" id="excel">Choose Excel workbook</button><div class="filename" id="excel-name">No workbook selected</div>
+      <label>Worksheet<select id="sheet" disabled></select></label>
+      <label>Match photos by<select id="match" disabled></select></label>
+      <div id="duplicate-rows" class="warning" hidden></div>
+    </section>
+    <section>
+      <h2><b>03</b> Photographs</h2>
+      <button class="pick" id="photos">Choose photo folder</button><div class="filename" id="photos-name">No folder selected</div>
+      <div id="photo-status" class="muted"></div>
+      <button class="text-button" id="photo-review" hidden>Review identical photos</button>
+    </section>
+    <section>
+      <h2><b>04</b> Export</h2>
+      <label>Filename pattern<input id="pattern" value="pre-####" autocomplete="off"></label>
+      <div class="inline"><select id="filename-column" aria-label="Filename variable"></select><button id="add-filename" title="Insert selected column">Insert</button></div>
+      <label>First sequence number<input id="start" type="number" min="0" max="999999999" value="1"></label>
+      <small class="muted">Each # sets the minimum sequence width. Skipped records keep their numbers.</small>
+      <button class="pick output" id="output">Choose output folder</button><div class="filename" id="output-name">No folder selected</div>
+      <button class="primary export" id="export">Generate PDFs</button>
+    </section>
+  </aside>
+  <div class="editor">
+    <div class="editor-head">
+      <div><span class="eyebrow">DESIGN</span><h2>Card editor</h2></div>
+      <div class="view-actions"><label class="sample-label">Sample<select id="sample" disabled></select></label><button id="preview" disabled>Preview card</button></div>
+    </div>
+    <nav class="toolbar" aria-label="Layout tools">
+      <button data-tool="select" aria-pressed="true">↖ Select</button>
+      <button data-tool="text" aria-pressed="false">T&nbsp; Text</button>
+      <button data-tool="photo" aria-pressed="false">▧&nbsp; Photo</button>
+      <button data-tool="cover" aria-pressed="false">▰&nbsp; Cover Area</button>
+      <span id="tool-help">Choose a template to begin</span>
+    </nav>
+    <div id="notice" role="status" hidden></div>
+    <div id="canvas-area" class="canvas-area">
+      <div id="empty" class="empty">
+        <div class="empty-icon" aria-hidden="true">▤</div><h2>Start with your ID template</h2>
+        <p>Open a PDF, then draw text, photo, and cover boxes directly on the card.</p>
+        <button id="empty-pdf" class="primary">Choose PDF template</button>
+      </div>
+      <div id="cards"></div>
+    </div>
+  </div>
+  <aside class="properties">
+    <div class="rail-title"><span class="eyebrow">EDIT</span><h2>Field properties</h2><p id="property-description">Select a field on the card to edit its placement and style.</p></div>
+    <div id="properties"></div>
+    <div class="layers-head"><h2>Fields</h2><span id="field-count">0</span></div>
+    <div id="layers"></div>
+  </aside>
+</main>
+<dialog id="dialog"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="dialog-close" aria-label="Close">×</button></div><div id="dialog-content"></div></dialog>
+</body>
+</html>
