@@ -537,7 +537,7 @@ function updatePhotoStatus() {
 function reviewPhotos() {
   if (!state.photoScan) return;
   const { groups, invalid } = state.photoScan;
-  const parts = [element("p", "Review each group before export. The first file is listed in alphabetical order. Omitting a file can leave its matched record without a photo.")];
+  const parts = [element("p", "Files in each group have identical image content. The first file is listed in alphabetical order. Omitting a file can leave its matched record without a photo.")];
   if (Object.keys(invalid).length) {
     parts.push(element("p", "Unreadable photos: " + Object.keys(invalid).join(", "), "warning"));
   }
@@ -547,19 +547,18 @@ function reviewPhotos() {
     const row = element("div", undefined, "photo-group-files");
     const controls = [];
     const note = element("p", "Choose how to resolve this group.", "muted");
-    for (const [i, file] of group.files.entries()) {
+    const thumbnail = api("thumbnail", { photos: state.photos, name: group.files[0].name });
+    for (const file of group.files) {
       const item = element("label", undefined, "thumbnail");
       const check = element("input");
       check.type = "checkbox";
       check.checked = state.resolutions[group.key]?.includes(file.name) ?? true;
       controls.push(check);
-      if (i === 0) {
-        const image = element("img");
-        image.alt = "Shared photo in group " + (index + 1);
-        item.append(image);
-        api("thumbnail", { photos: state.photos, name: file.name })
-          .then(({ image: src }) => { image.src = src; }).catch(() => { image.alt = "Preview unavailable"; });
-      }
+      const image = element("img");
+      image.alt = "Preview of " + file.name;
+      item.append(image);
+      thumbnail.then(({ image: src }) => { image.src = src; })
+        .catch(() => { image.alt = "Preview unavailable for " + file.name; });
       item.append(check, element("span", " Keep " + file.name),
         element("div", file.rows.length ? "Excel rows " + file.rows.join(", ") : "No matched row"));
       row.append(item);
