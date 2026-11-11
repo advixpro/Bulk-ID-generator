@@ -19,7 +19,13 @@ The launcher uses the bundled Python runtime when available. Otherwise it needs 
 
 Use **Save Setup** to save the template, selected pages, layout, styles, worksheet and photo mapping, and naming settings. **Open Setup** lists saved setups. Choose the current spreadsheet, photo folder, and output folder for each new batch. Windows stores setups under your local AppData folder in ID Card Studio.
 
+Each photo field has optional **Auto Framing** and **Use off-white background** settings. Auto Framing centers the head in a tight head-and-shoulders crop, with a small margin above the hair or head covering. It uses the existing photo box proportions. If it cannot make a clear crop, it uses the field's Fill or Fit setting. Background replacement keeps the original background when the person cannot be separated confidently. Cards that use either fallback are exported to **For Review** inside the selected output folder. Preview shows the warning, and the Excel report lists each affected card's reason and location. The models run locally. [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) and [PP-HumanSeg](https://github.com/opencv/opencv_zoo/tree/main/models/human_segmentation_pphumanseg) license files are in the models folder.
+
 The PDF artwork remains in its original PDF format. Text added by the editor is rendered at 360 DPI for consistent Arabic shaping and bidirectional layout. Standard PDF form templates are treated as artwork with their existing form appearances flattened before overlay placement. For XFA forms, start with a regular PDF copy. Cover boxes visually mask content. Use a blank template when the original sample information must be removed from the file itself.
+
+**Crop camera watermarks** is a separate photo setting. It uses local Tesseract OCR with English language data to look for recognizable camera branding such as Redmi or AI Quad Camera in the outer bands of a photo. It trims the affected edge when it can verify the crop keeps the head intact. A date or time alone does not trigger trimming, but may be in the trimmed area. The app looks for Tesseract on PATH and in the standard Windows installation folder. If OCR is unavailable or a detected brand cannot be safely cropped, the card goes to **For Review**.
+
+For Review PDFs and their original photos are saved directly in the same folder. An identical file is reused. If a different photo already has the same name, the new copy gets a suffix. The detailed Excel report lists the saved original photo name.
 
 ## Try it with the sample workbook
 

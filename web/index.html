@@ -38,6 +38,7 @@
       <h2><b>04</b> Export</h2>
       <label>Filename pattern<input id="pattern" value="pre-####" autocomplete="off"></label>
       <div class="inline"><select id="filename-column" aria-label="Filename variable"></select><button id="add-filename" title="Insert selected column">Insert</button></div>
+      <label>Group by column<select id="group-column" disabled><option value="">No grouping</option></select></label>
       <label>First sequence number<input id="start" type="number" min="0" max="999999999" value="1"></label>
       <small class="muted">Each # sets the minimum sequence width. Skipped records keep their numbers.</small>
       <button class="pick output" id="output">Choose output folder</button><div class="filename" id="output-name">No folder selected</div>

@@ -81,7 +81,7 @@ function patternData() {
     pdf: state.pdf, templateName: state.templateName, excel: state.excel, sheet: state.sheet,
     photos: state.photos, output: state.output,
     layout: { pages: state.layout.pages, fields: state.layout.fields.filter((field) => state.layout.pages.includes(field.page)) },
-    photoColumn: $("match").value, resolutions: state.resolutions,
+    photoColumn: $("match").value, groupColumn: $("group-column").value, resolutions: state.resolutions,
     pattern: $("pattern").value, start,
   };
 }
@@ -331,7 +331,7 @@ function property(field, name, key, type, choices) {
     field[key] = choices ? input.value : type === "checkbox" ? input.checked :
       type === "number" ? (Number.isFinite(input.valueAsNumber) ? input.valueAsNumber : field[key]) : input.value;
     refreshBoxes();
-    if (key === "gradient") renderProperties();
+    if (key === "gradient" || key === "font") renderProperties();
     if (key === "expression") renderLayers();
   });
   return fieldLabel(name, input);
@@ -426,7 +426,8 @@ function renderProperties() {
     }));
     panel.append(expression, insert,
       property(field, "Font", "font", "", state.fonts.map((font) => [font, font])),
-      property(field, "Bold", "bold", "checkbox"), property(field, "Italic", "italic", "checkbox"),
+      property(field, "Bold", "bold", "checkbox"),
+      ...(field.font === "Noto Kufi Arabic" ? [] : [property(field, "Italic", "italic", "checkbox")]),
       property(field, "Preferred size (pt)", "size", "number"),
       property(field, "Minimum size (pt)", "minSize", "number"),
       property(field, "Reading direction", "direction", "", [["auto", "Automatic"], ["ltr", "Left to right"], ["rtl", "Right to left"]]),
@@ -454,6 +455,9 @@ function renderProperties() {
     });
     panel.append(fieldLabel("Size preset", preset), property(field, "Lock aspect ratio", "locked", "checkbox"),
       property(field, "Image fit", "fit", "", [["fill", "Fill · crop to frame"], ["fit", "Fit · show entire photo"]]),
+      property(field, "Auto Framing", "autoFraming", "checkbox"),
+      property(field, "Use off-white background", "offWhite", "checkbox"),
+      property(field, "Crop camera watermarks", "cropWatermark", "checkbox"),
       property(field, "Corner radius (pt)", "radius", "number"));
   } else {
     panel.append(colorProperty(field, "Fill color", "color"), property(field, "Linear gradient", "gradient", "checkbox"));
@@ -478,6 +482,18 @@ function loadMatchOptions(preferred) {
   options(match, [["", "Select a column"], ...choices], preferred);
   match.disabled = !state.data;
   options($("filename-column"), columns.length ? columns.map((column) => [column, column]) : [["", "Excel column"]]);
+  loadGroupOptions($("group-column").value);
+}
+
+function loadGroupOptions(preferred) {
+  const columns = state.data?.columns || [];
+  const choices = columns.map((column) => [column, column]);
+  if (preferred && !columns.includes(preferred)) {
+    choices.unshift([preferred, preferred + (state.data ? " · missing" : " · saved")]);
+  }
+  const select = $("group-column");
+  options(select, [["", "No grouping"], ...choices], preferred);
+  select.disabled = !state.data;
 }
 
 async function loadExcel(path, sheet = "", preferred = $("match").value) {
@@ -636,6 +652,7 @@ async function openSetup() {
     $("pattern").value = setup.pattern;
     $("start").value = setup.start;
     loadMatchOptions(setup.photoColumn);
+    loadGroupOptions(setup.groupColumn);
     await loadPages(setup.layout.pages);
     dialog.close();
     notice("Opened “" + setup.name + "”. Choose the files for this batch.");
@@ -649,7 +666,7 @@ async function preview() {
   notice("Rendering the selected card…");
   const result = await api("preview", { ...data, sample: Number($("sample").value || 0) });
   notice();
-  const elements = [element("p", result.filename ? "Proposed filename · " + result.filename : "Load Excel to preview employee data.")];
+  const elements = [element("p", result.filename ? "Proposed export path · " + result.filename : "Load Excel to preview employee data.")];
   if (result.notice) elements.push(element("p", result.notice, "warning"));
   result.images.forEach((src, index) => {
     const side = index === 0 ? "Front" : "Back";
@@ -709,6 +726,10 @@ function showResults(id, result) {
   }
   const reasons = element("ul");
   Object.entries(result.reasons).forEach(([reason, count]) => reasons.append(element("li", count + " · " + reason)));
+  const reviewCount = result.review ?? 0;
+  const review = element("p", reviewCount.toLocaleString() + " generated PDFs saved in For Review.", "warning");
+  review.hidden = reviewCount === 0;
+  Object.entries(result.reviewReasons ?? {}).forEach(([reason, count]) => reasons.append(element("li", count + " · " + reason)));
   const report = button("Save Detailed Report", async () => {
     const blob = await api("report", { id }, true);
     const url = URL.createObjectURL(blob);
@@ -718,7 +739,7 @@ function showResults(id, result) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, "primary");
-  showDialog("Export complete", metrics, reasons, report);
+  showDialog("Export complete", metrics, review, reasons, report);
   notice(result.generated.toLocaleString() + " PDFs generated. " + result.skipped.toLocaleString() + " records skipped.");
 }
 

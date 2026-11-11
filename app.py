@@ -14,7 +14,7 @@ import threading
 import webbrowser
 
 from PIL import Image
-from engine import (FONTS, WINDOWS_FONTS, compose, duplicate_keys, file_name, normalized, page_box, photo,
+from engine import (FONTS, WINDOWS_FONTS, compose, duplicate_keys, file_name, group_folder, normalized, page_box, photo,
                     prepared_template, reader, render_pdf, report_file, run_batch, scan, validate_columns,
                     validate_layout, workbook)
 
@@ -137,7 +137,7 @@ def dispatch(action, data):
         path = None
         notice = ""
         if data.get("excel"):
-            validate_columns(layout, columns, data["pattern"], data.get("photoColumn"))
+            validate_columns(layout, columns, data["pattern"], data.get("photoColumn"), data.get("groupColumn"))
         if data.get("photos") and data.get("photoColumn"):
             key = normalized(values.get(data["photoColumn"], ""))
             allowed = []
@@ -153,9 +153,18 @@ def dispatch(action, data):
                 path = allowed[0]
             elif rows:
                 notice = "No unique usable photo for this sample."
-        finished = compose(prepared_template(data["pdf"], layout["pages"]), layout, values, path)
+        photo_warnings = []
+        finished = compose(prepared_template(data["pdf"], layout["pages"]), layout, values, path, photo_warnings)
+        if photo_warnings:
+            review = "This card will export to For Review. " + " ".join(dict.fromkeys(photo_warnings))
+            notice = " ".join(filter(None, (notice, review)))
+        filename = file_name(data["pattern"], values, int(data.get("start", 1)) + sample) if rows else ""
+        group_column = data.get("groupColumn")
+        if filename and (photo_warnings or group_column):
+            directory = "For Review" if photo_warnings else group_folder(values.get(group_column, ""))
+            filename = str(Path(directory) / filename)
         return {"images": [png(render_pdf(finished, side)) for side in range(len(layout["pages"]))],
-                "filename": file_name(data["pattern"], values, int(data.get("start", 1)) + sample) if rows else "",
+                "filename": filename,
                 "notice": notice}
     if action == "list":
         SETUPS.mkdir(parents=True, exist_ok=True)
@@ -177,6 +186,7 @@ def dispatch(action, data):
             if source.resolve() != target.resolve():
                 shutil.copyfile(source, target)
             setup = {key: data[key] for key in ("layout", "pattern", "start", "photoColumn", "sheet")}
+            setup["groupColumn"] = data.get("groupColumn", "")
             setup.update(name=name, pdfFile=pdf_file, templateName=data.get("templateName") or source.name)
             temporary = path / "setup.tmp"
             temporary.write_text(json.dumps(setup, ensure_ascii=False), encoding="utf-8")

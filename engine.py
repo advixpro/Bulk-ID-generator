@@ -8,6 +8,7 @@ from pathlib import Path
 import math
 import os
 import re
+from shutil import copyfileobj
 import threading
 
 from openpyxl import load_workbook
@@ -18,16 +19,19 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen.canvas import Canvas
 import xlsxwriter
+from portrait import Portrait
 
 PDFIUM_LOCK = threading.Lock()
 TOKEN = re.compile(r"\{([^{}]+)\}")
 SEQUENCE = re.compile(r"#+")
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 WINDOWS_FONTS = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+NOTO_KUFI = Path(__file__).resolve().parent / "fonts" / "NotoKufiArabic.ttf"
 FONTS = {
     "Arial": ("arial.ttf", "arialbd.ttf", "ariali.ttf", "arialbi.ttf"),
     "Segoe UI": ("segoeui.ttf", "segoeuib.ttf", "segoeuii.ttf", "segoeuiz.ttf"),
     "Times New Roman": ("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf"),
+    "Noto Kufi Arabic": (NOTO_KUFI,),
 }
 
 
@@ -164,6 +168,18 @@ def reader(path):
     return document
 
 
+def group_folder(value):
+    value = value.strip()
+    if not value:
+        return "Unassigned"
+    safe = re.sub(r'[<>:"/\\|?*%\x00-\x1f]', "_", value).strip(" .")[:100].rstrip(" .")
+    reserved = re.fullmatch(r"CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]", safe.split(".")[0].rstrip(), re.I)
+    if safe != value or reserved or safe.casefold() in {"for review", "unassigned"}:
+        suffix = sha256(value.encode()).hexdigest()[:12]
+        return f"{'_' if reserved else ''}{safe or 'Group'}%{suffix}"
+    return safe
+
+
 def prepared_template(path, pages):
     document = reader(path)
     form = document.root_object.get("/AcroForm")
@@ -204,6 +220,11 @@ def render_pdf(source, page=0, limit=1150):
 @lru_cache(maxsize=128)
 def font_at(family, bold, italic, size):
     variants = FONTS[family]
+    if variants[0] == NOTO_KUFI:
+        font = ImageFont.truetype(str(NOTO_KUFI), size, layout_engine=ImageFont.Layout.RAQM)
+        if bold:
+            font.set_variation_by_axes([700])
+        return font
     filename = variants[int(bool(bold)) + 2 * int(bool(italic))]
     return ImageFont.truetype(str(WINDOWS_FONTS / filename), size, layout_engine=ImageFont.Layout.RAQM)
 
@@ -247,18 +268,14 @@ def paint_photo(canvas, field, source, box, units):
     w, h = max(1, round(width * 5 * units)), max(1, round(height * 5 * units))
     if w * h > 35_000_000:
         raise ValueError("The photo box is too large to render.")
-    if field["fit"] == "fill":
-        image = ImageOps.fit(source, (w, h), Image.Resampling.LANCZOS)
-    else:
-        image = Image.new("RGBA", (w, h))
-        fitted = ImageOps.contain(source, (w, h), Image.Resampling.LANCZOS)
-        image.paste(fitted, ((w - fitted.width) // 2, (h - fitted.height) // 2))
+    image, warnings = source.render(field, (w, h))
     radius = min(w / 2, h / 2, max(0, float(field.get("radius", 0))) * 5)
     if radius:
         mask = Image.new("L", (w, h))
         ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
         image.putalpha(ImageChops.multiply(mask, image.getchannel("A")))
     canvas.drawImage(ImageReader(image), x, y, width, height, mask="auto")
+    return warnings
 
 
 def paint_cover(canvas, field, box):
@@ -288,9 +305,9 @@ def page_box(page):
     return left, bottom, width, height
 
 
-def compose(template, layout, values, photo_path=None):
+def compose(template, layout, values, photo_path=None, photo_warnings=None):
     writer = PdfWriter()
-    image = photo(photo_path) if photo_path else None
+    portrait = Portrait(photo(photo_path)) if photo_path else None
     for side in layout["pages"]:
         page = writer.add_page(template.pages[side])
         # The preview uses the visible intersection of the media and crop boxes.
@@ -309,8 +326,10 @@ def compose(template, layout, values, photo_path=None):
                 paint_cover(canvas, field, box)
             elif field["kind"] == "text":
                 paint_text(canvas, field, values, box, page.user_unit)
-            elif image is not None:
-                paint_photo(canvas, field, image, box, page.user_unit)
+            elif portrait is not None:
+                warnings = paint_photo(canvas, field, portrait, box, page.user_unit)
+                if photo_warnings is not None:
+                    photo_warnings.extend(warnings)
         canvas.showPage()
         canvas.save()
         page.merge_transformed_page(PdfReader(overlay).pages[0], Transformation().translate(left, bottom))
@@ -335,13 +354,15 @@ def validate_layout(layout, template):
             raise ValueError("Text sizes must be between 1 and 250 pt, with minimum at or below preferred size.")
 
 
-def validate_columns(layout, columns, pattern="", photo_column=""):
+def validate_columns(layout, columns, pattern="", photo_column="", group_column=""):
     expressions = [field["expression"] for field in layout["fields"] if field["kind"] == "text"]
     missing = set(TOKEN.findall(pattern))
     for expression in expressions:
         missing.update(TOKEN.findall(expression))
     if photo_column:
         missing.add(photo_column)
+    if group_column:
+        missing.add(group_column)
     missing.difference_update(columns)
     if missing:
         raise ValueError("Missing Excel columns: " + ", ".join(sorted(missing)))
@@ -367,6 +388,34 @@ def export_pdf(folder, requested, contents):
         return actual
 
 
+def copy_review_photo(source, destination):
+    suffix = 1
+    with source.open("rb") as original:
+        source_size = os.fstat(original.fileno()).st_size
+        while True:
+            name = source.name if suffix == 1 else f"{source.stem}_{suffix}{source.suffix}"
+            target = destination / name
+            original.seek(0)
+            try:
+                output = target.open("xb")
+            except FileExistsError:
+                if target.is_file() and target.stat().st_size == source_size:
+                    with target.open("rb") as existing:
+                        while (chunk := original.read(1024 * 1024)) and chunk == existing.read(len(chunk)):
+                            pass
+                        if not chunk and not existing.read(1):
+                            return name
+                suffix += 1
+                continue
+            try:
+                with output:
+                    copyfileobj(original, output)
+            except OSError:
+                target.unlink(missing_ok=True)
+                raise
+            return name
+
+
 def run_batch(data, job):
     layout = data["layout"]
     template = reader(data["pdf"])
@@ -381,7 +430,8 @@ def run_batch(data, job):
     pattern = data["pattern"]
     if not pattern.strip():
         raise ValueError("Enter a filename pattern.")
-    validate_columns(layout, columns, pattern, column)
+    group_column = data.get("groupColumn")
+    validate_columns(layout, columns, pattern, column, group_column)
     folder = Path(data["output"])
     if not folder.is_dir():
         raise ValueError("Select an existing output folder.")
@@ -394,6 +444,8 @@ def run_batch(data, job):
     duplicates = duplicate_keys(rows, column) if column else {}
     reports = []
     reasons = Counter()
+    review_reasons = Counter()
+    review = 0
     generated = 0
     renamed = 0
     job.update(total=len(rows), done=0)
@@ -404,6 +456,9 @@ def run_batch(data, job):
         usable = [name for name in matched if name not in omitted and name not in invalid]
         notes = [f"{name}: {decisions[name]}" for name in matched if name in decisions]
         issue = ""
+        warnings = []
+        location = ""
+        review_photo = ""
         try:
             requested = file_name(pattern, values, sequence)
             if key in duplicates:
@@ -419,19 +474,38 @@ def run_batch(data, job):
                     if matched:
                         raise ValueError("Matching photo was omitted.")
                     raise ValueError("Missing photo.")
-            contents = compose(template, layout, values, files[usable[0]] if has_photo else None)
-            actual = export_pdf(folder, requested, contents)
+            source = files[usable[0]] if has_photo else None
+            contents = compose(template, layout, values, source, warnings)
+            destination = folder
+            if warnings:
+                destination /= "For Review"
+            elif group_column:
+                destination /= group_folder(values.get(group_column, ""))
+            if destination != folder:
+                destination.mkdir(exist_ok=True)
+            actual = export_pdf(destination, requested, contents)
+            location = str((destination / actual).relative_to(folder))
             generated += 1
             renamed += actual != requested
+            if warnings:
+                review += 1
+                try:
+                    review_photo = copy_review_photo(source, destination)
+                except OSError as error:
+                    warnings.append(f"Original photo could not be copied: {error}")
+                review_reasons.update(set(warnings))
+                issue = " | ".join(dict.fromkeys(warnings))
         except (ValueError, OSError) as error:
             issue = str(error)
             reasons["Text overflow" if issue.startswith("Text does not fit") else issue] += 1
         reports.append([row, values.get("Employee ID", ""), values.get(column, ""), ", ".join(matched),
-                        "Generated" if actual else "Skipped", requested, actual, issue, " | ".join(notes)])
+                        ("For Review" if warnings else "Generated") if actual else "Skipped",
+                        requested, actual, issue, " | ".join(notes), location, review_photo])
         job.update(done=len(reports), generated=generated)
     return {
         "total": len(rows), "generated": generated, "skipped": len(rows) - generated,
-        "renamed": renamed, "reasons": dict(reasons),
+        "renamed": renamed, "reasons": dict(reasons), "review": review,
+        "reviewReasons": dict(review_reasons),
     }, reports, [[name, note] for name, note in decisions.items()] + [
         [name, "Unreadable: " + reason] for name, reason in invalid.items()
     ]
@@ -446,12 +520,15 @@ def report_file(result, records, photos):
         summary.set_column(0, 0, 54)
         summary.write_row(0, 0, ["Outcome", "Count"], header)
         metrics = [(key.capitalize(), result[key]) for key in ("total", "generated", "skipped", "renamed")]
-        for index, item in enumerate(metrics + list(result["reasons"].items()), 1):
+        metrics.append(("For Review (included in Generated)", result["review"]))
+        details = list(result["reasons"].items()) + list(result["reviewReasons"].items())
+        for index, item in enumerate(metrics + details, 1):
             summary.write_row(index, 0, item)
         for name, titles, data, widths in [
             ("Records", ["Excel row", "Employee ID", "Match value", "Matching photos", "Status",
-                         "Requested filename", "Actual filename", "Issue", "Photo decisions"],
-             records, [12, 16, 20, 30, 14, 35, 35, 65, 65]),
+                         "Requested filename", "Actual filename", "Issue", "Photo decisions", "Export location",
+                         "Saved original photo"],
+             records, [12, 16, 20, 30, 14, 35, 35, 65, 65, 45, 32]),
             ("Photo checks", ["Photo filename", "Decision or issue"], photos, [32, 65]),
         ]:
             sheet = book.add_worksheet(name)
